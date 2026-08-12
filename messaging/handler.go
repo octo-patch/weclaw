@@ -39,9 +39,9 @@ type Handler struct {
 	customAliases map[string]string      // custom alias -> agent name (from config)
 	factory       AgentFactory
 	saveDefault   SaveDefaultFunc
-	contextTokens sync.Map   // map[userID]contextToken
-	saveDir       string     // directory to save images/files to
-	seenMsgs      sync.Map   // map[int64]time.Time — dedup by message_id
+	contextTokens sync.Map // map[userID]contextToken
+	saveDir       string   // directory to save images/files to
+	seenMsgs      sync.Map // map[int64]time.Time - dedup by message_id
 }
 
 // NewHandler creates a new message handler.
@@ -285,12 +285,15 @@ func (h *Handler) HandleMessage(ctx context.Context, client *ilink.Client, msg i
 			log.Printf("[handler] voice transcription from %s: %q", msg.FromUserID, truncate(text, 80))
 		}
 	}
+	if img := extractImage(msg); img != nil && h.saveDir != "" {
+		h.handleImageSave(ctx, client, msg, img, text)
+		return
+	}
+	if video := extractVideo(msg); video != nil && h.saveDir != "" {
+		h.handleVideoSave(ctx, client, msg, video, text)
+		return
+	}
 	if text == "" {
-		// Check for image message
-		if img := extractImage(msg); img != nil && h.saveDir != "" {
-			h.handleImageSave(ctx, client, msg, img)
-			return
-		}
 		log.Printf("[handler] received non-text message from %s, skipping", msg.FromUserID)
 		return
 	}
@@ -714,6 +717,15 @@ func extractImage(msg ilink.WeixinMessage) *ilink.ImageItem {
 	return nil
 }
 
+func extractVideo(msg ilink.WeixinMessage) *ilink.VideoItem {
+	for _, item := range msg.ItemList {
+		if item.Type == ilink.ItemTypeVideo && item.VideoItem != nil {
+			return item.VideoItem
+		}
+	}
+	return nil
+}
+
 func extractVoiceText(msg ilink.WeixinMessage) string {
 	for _, item := range msg.ItemList {
 		if item.Type == ilink.ItemTypeVoice && item.VoiceItem != nil && item.VoiceItem.Text != "" {
@@ -723,7 +735,7 @@ func extractVoiceText(msg ilink.WeixinMessage) string {
 	return ""
 }
 
-func (h *Handler) handleImageSave(ctx context.Context, client *ilink.Client, msg ilink.WeixinMessage, img *ilink.ImageItem) {
+func (h *Handler) handleImageSave(ctx context.Context, client *ilink.Client, msg ilink.WeixinMessage, img *ilink.ImageItem, prompt string) {
 	clientID := NewClientID()
 	log.Printf("[handler] received image from %s, saving to %s", msg.FromUserID, h.saveDir)
 
@@ -779,10 +791,92 @@ func (h *Handler) handleImageSave(ctx context.Context, client *ilink.Client, msg
 	}
 
 	log.Printf("[handler] saved image to %s (%d bytes)", filePath, len(data))
-	reply := fmt.Sprintf("Saved: %s", fileName)
-	if err := SendTextReply(ctx, client, msg.FromUserID, reply, msg.ContextToken, clientID); err != nil {
-		log.Printf("[handler] failed to send reply to %s: %v", msg.FromUserID, err)
+	if strings.TrimSpace(prompt) == "" {
+		prompt = "Please analyze the attached image."
 	}
+	h.sendAttachmentToDefaultAgent(ctx, client, msg, prompt, agent.Attachment{
+		Path:     filePath,
+		MIMEType: mimeTypeFromImageExt(ext),
+		Name:     fileName,
+	}, clientID)
+}
+
+func (h *Handler) handleVideoSave(ctx context.Context, client *ilink.Client, msg ilink.WeixinMessage, video *ilink.VideoItem, prompt string) {
+	clientID := NewClientID()
+	log.Printf("[handler] received video from %s, saving to %s", msg.FromUserID, h.saveDir)
+
+	if video.Media == nil || video.Media.EncryptQueryParam == "" {
+		log.Printf("[handler] video has no media info from %s", msg.FromUserID)
+		return
+	}
+
+	data, err := DownloadFileFromCDN(ctx, video.Media.EncryptQueryParam, video.Media.AESKey)
+	if err != nil {
+		log.Printf("[handler] failed to download video from %s: %v", msg.FromUserID, err)
+		reply := fmt.Sprintf("Failed to save video: %v", err)
+		_ = SendTextReply(ctx, client, msg.FromUserID, reply, msg.ContextToken, clientID)
+		return
+	}
+
+	fileName := fmt.Sprintf("%s.mp4", time.Now().Format("20060102-150405"))
+	filePath := filepath.Join(h.saveDir, fileName)
+	if err := os.MkdirAll(h.saveDir, 0o755); err != nil {
+		log.Printf("[handler] failed to create save dir: %v", err)
+		return
+	}
+	if err := os.WriteFile(filePath, data, 0o644); err != nil {
+		log.Printf("[handler] failed to write video: %v", err)
+		reply := fmt.Sprintf("Failed to save video: %v", err)
+		_ = SendTextReply(ctx, client, msg.FromUserID, reply, msg.ContextToken, clientID)
+		return
+	}
+
+	log.Printf("[handler] saved video to %s (%d bytes)", filePath, len(data))
+	if strings.TrimSpace(prompt) == "" {
+		prompt = "Please analyze the attached video."
+	}
+	h.sendAttachmentToDefaultAgent(ctx, client, msg, prompt, agent.Attachment{
+		Path:     filePath,
+		MIMEType: "video/mp4",
+		Name:     fileName,
+	}, clientID)
+}
+
+func (h *Handler) sendAttachmentToDefaultAgent(ctx context.Context, client *ilink.Client, msg ilink.WeixinMessage, prompt string, attachment agent.Attachment, clientID string) {
+	go func() {
+		if typingErr := SendTypingState(ctx, client, msg.FromUserID, msg.ContextToken); typingErr != nil {
+			log.Printf("[handler] failed to send typing state: %v", typingErr)
+		}
+	}()
+
+	h.mu.RLock()
+	defaultName := h.defaultName
+	h.mu.RUnlock()
+
+	ag := h.getDefaultAgent()
+	if ag == nil {
+		reply := fmt.Sprintf("Saved: %s", attachment.Name)
+		h.sendReplyWithMedia(ctx, client, msg, defaultName, reply, clientID)
+		return
+	}
+
+	info := ag.Info()
+	log.Printf("[handler] dispatching attachment to agent (%s) for %s", info, msg.FromUserID)
+	start := time.Now()
+	var reply string
+	var err error
+	if attachmentAgent, ok := ag.(agent.AttachmentChatAgent); ok {
+		reply, err = attachmentAgent.ChatWithAttachments(ctx, msg.FromUserID, prompt, []agent.Attachment{attachment})
+	} else {
+		reply, err = ag.Chat(ctx, msg.FromUserID, agent.MessageWithAttachmentFallback(prompt, []agent.Attachment{attachment}))
+	}
+	if err != nil {
+		log.Printf("[handler] agent error (%s, elapsed=%s): %v", info, time.Since(start), err)
+		reply = fmt.Sprintf("Error: %v", err)
+	} else {
+		log.Printf("[handler] agent replied (%s, elapsed=%s): %q", info, time.Since(start), truncate(reply, 100))
+	}
+	h.sendReplyWithMedia(ctx, client, msg, defaultName, reply, clientID)
 }
 
 func detectImageExt(data []byte) string {
@@ -810,4 +904,21 @@ func detectImageExt(data []byte) string {
 		return ".bmp"
 	}
 	return ".jpg" // default to jpg for WeChat images
+}
+
+func mimeTypeFromImageExt(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".bmp":
+		return "image/bmp"
+	default:
+		return "application/octet-stream"
+	}
 }

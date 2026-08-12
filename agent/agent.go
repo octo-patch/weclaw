@@ -93,3 +93,44 @@ type Agent interface {
 	// SetCwd changes the working directory for subsequent operations.
 	SetCwd(cwd string)
 }
+
+// Attachment describes a local file attached to a user message.
+type Attachment struct {
+	Path     string
+	MIMEType string
+	Name     string
+}
+
+// AttachmentChatAgent can receive local file attachments in addition to text.
+type AttachmentChatAgent interface {
+	ChatWithAttachments(ctx context.Context, conversationID string, message string, attachments []Attachment) (string, error)
+}
+
+// MessageWithAttachmentFallback adds local attachment paths to a text prompt.
+func MessageWithAttachmentFallback(message string, attachments []Attachment) string {
+	if len(attachments) == 0 {
+		return message
+	}
+
+	var b strings.Builder
+	if strings.TrimSpace(message) != "" {
+		b.WriteString(message)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("The user attached the following local file(s):")
+	for _, attachment := range attachments {
+		b.WriteString("\n- ")
+		if attachment.Name != "" {
+			b.WriteString(attachment.Name)
+			b.WriteString(": ")
+		}
+		b.WriteString(attachment.Path)
+		if attachment.MIMEType != "" {
+			b.WriteString(" (")
+			b.WriteString(attachment.MIMEType)
+			b.WriteString(")")
+		}
+	}
+	b.WriteString("\nPlease inspect and process the attachment(s) as needed.")
+	return b.String()
+}

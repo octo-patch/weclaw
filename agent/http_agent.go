@@ -3,10 +3,15 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -14,7 +19,18 @@ import (
 // ChatMessage represents a single message in a conversation.
 type ChatMessage struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
+}
+
+type chatContentPart struct {
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *chatMediaURL `json:"image_url,omitempty"`
+	VideoURL *chatMediaURL `json:"video_url,omitempty"`
+}
+
+type chatMediaURL struct {
+	URL string `json:"url"`
 }
 
 // HTTPAgent is an OpenAI-compatible chat completions API client.
@@ -84,8 +100,28 @@ func (a *HTTPAgent) ResetSession(_ context.Context, conversationID string) (stri
 
 // Chat sends a message to the OpenAI-compatible API and returns the response.
 func (a *HTTPAgent) Chat(ctx context.Context, conversationID string, message string) (string, error) {
+	return a.chat(ctx, conversationID, message)
+}
+
+// ChatWithAttachments sends supported media as native content parts.
+func (a *HTTPAgent) ChatWithAttachments(ctx context.Context, conversationID string, message string, attachments []Attachment) (string, error) {
+	if len(attachments) == 0 {
+		return a.Chat(ctx, conversationID, message)
+	}
+	if a.model != "MiniMax-M3" {
+		return a.Chat(ctx, conversationID, MessageWithAttachmentFallback(message, attachments))
+	}
+
+	content, err := buildNativeMediaContent(message, attachments)
+	if err != nil {
+		return "", err
+	}
+	return a.chat(ctx, conversationID, content)
+}
+
+func (a *HTTPAgent) chat(ctx context.Context, conversationID string, content any) (string, error) {
 	a.mu.Lock()
-	messages := a.buildMessages(conversationID, message)
+	messages := a.buildMessages(conversationID, content)
 	a.mu.Unlock()
 
 	reqBody := map[string]interface{}{
@@ -145,7 +181,7 @@ func (a *HTTPAgent) Chat(ctx context.Context, conversationID string, message str
 	// Save to history
 	a.mu.Lock()
 	a.history[conversationID] = append(a.history[conversationID],
-		ChatMessage{Role: "user", Content: message},
+		ChatMessage{Role: "user", Content: content},
 		ChatMessage{Role: "assistant", Content: reply},
 	)
 	// Trim history
@@ -157,7 +193,7 @@ func (a *HTTPAgent) Chat(ctx context.Context, conversationID string, message str
 	return reply, nil
 }
 
-func (a *HTTPAgent) buildMessages(conversationID string, message string) []ChatMessage {
+func (a *HTTPAgent) buildMessages(conversationID string, content any) []ChatMessage {
 	var messages []ChatMessage
 	if a.systemPrompt != "" {
 		messages = append(messages, ChatMessage{Role: "system", Content: a.systemPrompt})
@@ -165,6 +201,37 @@ func (a *HTTPAgent) buildMessages(conversationID string, message string) []ChatM
 	if hist, ok := a.history[conversationID]; ok {
 		messages = append(messages, hist...)
 	}
-	messages = append(messages, ChatMessage{Role: "user", Content: message})
+	messages = append(messages, ChatMessage{Role: "user", Content: content})
 	return messages
+}
+
+func buildNativeMediaContent(message string, attachments []Attachment) ([]chatContentPart, error) {
+	parts := make([]chatContentPart, 0, len(attachments)+1)
+	if strings.TrimSpace(message) != "" {
+		parts = append(parts, chatContentPart{Type: "text", Text: message})
+	}
+
+	for _, attachment := range attachments {
+		mediaType := attachment.MIMEType
+		if mediaType == "" {
+			mediaType = mime.TypeByExtension(filepath.Ext(attachment.Path))
+		}
+		mediaType = strings.ToLower(strings.TrimSpace(strings.Split(mediaType, ";")[0]))
+		if !strings.HasPrefix(mediaType, "image/") && !strings.HasPrefix(mediaType, "video/") {
+			return nil, fmt.Errorf("unsupported native media type %q", mediaType)
+		}
+
+		data, err := os.ReadFile(attachment.Path)
+		if err != nil {
+			return nil, fmt.Errorf("read attachment %q: %w", attachment.Path, err)
+		}
+		media := &chatMediaURL{URL: "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(data)}
+		part := chatContentPart{Type: "image_url", ImageURL: media}
+		if strings.HasPrefix(mediaType, "video/") {
+			part = chatContentPart{Type: "video_url", VideoURL: media}
+		}
+		parts = append(parts, part)
+	}
+
+	return parts, nil
 }
