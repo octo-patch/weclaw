@@ -185,7 +185,7 @@ curl -X POST http://127.0.0.1:18011/api/send \
       "type": "http",
       "endpoint": "https://api.minimax.io/v1/chat/completions",
       "api_key": "sk-xxx",
-      "model": "MiniMax-M3"
+      "model": "MiniMax-M3.1-Flash"
     }
   }
 }
@@ -199,7 +199,9 @@ curl -X POST http://127.0.0.1:18011/api/send \
 - `MINIMAX_API_KEY` — 启用 MiniMax 的 OpenAI 兼容 HTTP provider
 - `MINIMAX_REGION` — MiniMax 区域：`global_en`（默认）或 `cn_zh`
 - `MINIMAX_BASE_URL` — 覆盖 MiniMax Chat Completions 地址
-- `MINIMAX_MODEL` — MiniMax 模型，如 `MiniMax-M3`（默认）或 `MiniMax-M2.7`
+- `MINIMAX_MODEL` — MiniMax model: `MiniMax-M3.1-Flash` (default) or `MiniMax-M3`; explicit custom and legacy model IDs remain supported
+
+These environment variables configure a new MiniMax agent. Existing saved agent settings, including the model and endpoint, are preserved.
 
 自定义 agent cli 环境变量
 

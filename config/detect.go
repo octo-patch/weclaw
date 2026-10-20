@@ -263,9 +263,9 @@ var minimaxEndpoints = map[string]string{
 const (
 	// minimaxDefaultRegion is used when MINIMAX_REGION is unset or unknown.
 	minimaxDefaultRegion = "global_en"
-	// minimaxDefaultModel is the default MiniMax model. MiniMax-M2.7 is also
-	// available and can be selected via MINIMAX_MODEL.
-	minimaxDefaultModel = "MiniMax-M3"
+	// minimaxDefaultModel is used for new configurations. MiniMax-M3 can also
+	// be selected via MINIMAX_MODEL; explicit model IDs are preserved.
+	minimaxDefaultModel = "MiniMax-M3.1-Flash"
 )
 
 // loadMinimaxProvider resolves the MiniMax OpenAI-compatible provider preset
@@ -274,7 +274,7 @@ const (
 //   - MINIMAX_API_KEY: API key (required to enable the provider)
 //   - MINIMAX_REGION: "global_en" (default) or "cn_zh"
 //   - MINIMAX_BASE_URL: full chat-completions endpoint override
-//   - MINIMAX_MODEL: model id override (default MiniMax-M3)
+//   - MINIMAX_MODEL: model id override (default MiniMax-M3.1-Flash)
 func loadMinimaxProvider() (endpoint, apiKey, model string) {
 	apiKey = os.Getenv("MINIMAX_API_KEY")
 	if apiKey == "" {

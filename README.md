@@ -184,7 +184,7 @@ Config file: `~/.weclaw/config.json`
       "type": "http",
       "endpoint": "https://api.minimax.io/v1/chat/completions",
       "api_key": "sk-xxx",
-      "model": "MiniMax-M3"
+      "model": "MiniMax-M3.1-Flash"
     }
   }
 }
@@ -197,7 +197,9 @@ Environment variables:
 - `MINIMAX_API_KEY` — enable the MiniMax OpenAI-compatible HTTP provider
 - `MINIMAX_REGION` — MiniMax region: `global_en` (default) or `cn_zh`
 - `MINIMAX_BASE_URL` — override the MiniMax chat completions endpoint
-- `MINIMAX_MODEL` — MiniMax model, e.g. `MiniMax-M3` (default) or `MiniMax-M2.7`
+- `MINIMAX_MODEL` — MiniMax model: `MiniMax-M3.1-Flash` (default) or `MiniMax-M3`; explicit custom and legacy model IDs remain supported
+
+These environment variables configure a new MiniMax agent. Existing saved agent settings, including the model and endpoint, are preserved.
 
 Custom agent CLI environment variables:
 

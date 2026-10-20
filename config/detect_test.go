@@ -102,7 +102,7 @@ func TestLoadMinimaxProvider(t *testing.T) {
 		if apiKey != "test-key" {
 			t.Fatalf("apiKey = %q", apiKey)
 		}
-		if model != "MiniMax-M3" {
+		if model != "MiniMax-M3.1-Flash" {
 			t.Fatalf("model = %q", model)
 		}
 	})
@@ -150,7 +150,7 @@ func TestDetectAndConfigure_Minimax(t *testing.T) {
 	if ag.Endpoint != "https://api.minimax.io/v1/chat/completions" {
 		t.Fatalf("endpoint = %q", ag.Endpoint)
 	}
-	if ag.Model != "MiniMax-M3" {
+	if ag.Model != "MiniMax-M3.1-Flash" {
 		t.Fatalf("model = %q", ag.Model)
 	}
 }
