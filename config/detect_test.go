@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"os/exec"
+	"reflect"
 	"testing"
 )
 
@@ -132,6 +133,9 @@ func TestLoadMinimaxProvider(t *testing.T) {
 
 // TestDetectAndConfigure_Minimax verifies MINIMAX_API_KEY enables the HTTP provider.
 func TestDetectAndConfigure_Minimax(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("OPENCLAW_GATEWAY_URL", "")
 	t.Setenv("MINIMAX_API_KEY", "test-key")
 	t.Setenv("MINIMAX_REGION", "")
 	t.Setenv("MINIMAX_BASE_URL", "")
@@ -155,8 +159,54 @@ func TestDetectAndConfigure_Minimax(t *testing.T) {
 	}
 }
 
+// MiniMax environment defaults must not migrate a saved agent or its selection.
+func TestDetectAndConfigure_MinimaxSavedSettings(t *testing.T) {
+	for _, tc := range []struct{ name, model string }{
+		{"minimax", "MiniMax-M3"},
+		{"minimax", "MiniMax-M2.7"},
+		{"minimax", "custom-model"},
+		{"custom-http", "custom-model"},
+	} {
+		t.Run(tc.name+"/"+tc.model, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("PATH", t.TempDir())
+			t.Setenv("OPENCLAW_GATEWAY_URL", "")
+			t.Setenv("WECLAW_DEFAULT_AGENT", "")
+			t.Setenv("MINIMAX_API_KEY", "test-key")
+			t.Setenv("MINIMAX_MODEL", "MiniMax-M3.1-Flash")
+			t.Setenv("MINIMAX_REGION", "")
+			t.Setenv("MINIMAX_BASE_URL", "")
+			saved := AgentConfig{
+				Type: "http", Model: tc.model, Endpoint: "https://proxy.example.com/v1/chat/completions",
+				APIKey: "saved-test-key", Headers: map[string]string{"X-Custom": "preserved"},
+				SystemPrompt: "Saved instructions", MaxHistory: 4, Aliases: []string{"saved-alias"},
+			}
+			cfg := DefaultConfig()
+			cfg.Agents[tc.name] = saved
+			cfg.DefaultAgent = tc.name
+			if err := Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			DetectAndConfigure(cfg)
+			if cfg.DefaultAgent != tc.name || !reflect.DeepEqual(cfg.Agents[tc.name], saved) {
+				t.Fatalf("saved configuration changed: %#v", cfg)
+			}
+			if tc.name != "minimax" && cfg.Agents["minimax"].Model != "MiniMax-M3.1-Flash" {
+				t.Fatal("expected the MiniMax preset alongside the saved default agent")
+			}
+		})
+	}
+}
+
 // TestDetectAndConfigure_MinimaxDisabled verifies no provider without the key.
 func TestDetectAndConfigure_MinimaxDisabled(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("OPENCLAW_GATEWAY_URL", "")
 	t.Setenv("MINIMAX_API_KEY", "")
 
 	cfg := DefaultConfig()

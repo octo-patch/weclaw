@@ -26,6 +26,7 @@ func TestMinimaxPresetHTTPRequest(t *testing.T) {
 	const custom = "https://proxy.example.com/v1/chat/completions"
 	for _, tc := range []struct {
 		name, region, model, endpoint, wantModel, wantEndpoint string
+		savedAgent                                             string
 		saved                                                  bool
 	}{
 		{name: "global default", wantModel: "MiniMax-M3.1-Flash", wantEndpoint: global},
@@ -38,6 +39,7 @@ func TestMinimaxPresetHTTPRequest(t *testing.T) {
 		{name: "saved M3", saved: true, model: "MiniMax-M3", wantModel: "MiniMax-M3", wantEndpoint: custom},
 		{name: "saved legacy", saved: true, model: "MiniMax-M2.7", wantModel: "MiniMax-M2.7", wantEndpoint: custom},
 		{name: "saved custom", saved: true, model: "custom-model", wantModel: "custom-model", wantEndpoint: custom},
+		{name: "saved non-MiniMax default", saved: true, savedAgent: "custom-http", model: "custom-model", wantModel: "custom-model", wantEndpoint: custom},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
@@ -50,6 +52,10 @@ func TestMinimaxPresetHTTPRequest(t *testing.T) {
 			t.Setenv("MINIMAX_BASE_URL", tc.endpoint)
 
 			cfg := config.DefaultConfig()
+			agentName := "minimax"
+			if tc.savedAgent != "" {
+				agentName = tc.savedAgent
+			}
 			var saved config.AgentConfig
 			if tc.saved {
 				saved = config.AgentConfig{
@@ -58,8 +64,8 @@ func TestMinimaxPresetHTTPRequest(t *testing.T) {
 					SystemPrompt: "Saved instructions", MaxHistory: 4,
 					Aliases: []string{"saved-alias"},
 				}
-				cfg.Agents["minimax"] = saved
-				cfg.DefaultAgent = "minimax"
+				cfg.Agents[agentName] = saved
+				cfg.DefaultAgent = agentName
 				if err := config.Save(cfg); err != nil {
 					t.Fatal(err)
 				}
@@ -72,11 +78,14 @@ func TestMinimaxPresetHTTPRequest(t *testing.T) {
 				t.Setenv("MINIMAX_MODEL", "MiniMax-M3.1-Flash")
 			}
 			config.DetectAndConfigure(cfg)
-			if cfg.DefaultAgent != "minimax" {
-				t.Fatalf("default agent = %q", cfg.DefaultAgent)
+			if cfg.DefaultAgent != agentName {
+				t.Fatalf("default agent = %q, want %q", cfg.DefaultAgent, agentName)
 			}
-			if tc.saved && !reflect.DeepEqual(cfg.Agents["minimax"], saved) {
-				t.Fatalf("saved configuration changed: %#v", cfg.Agents["minimax"])
+			if tc.saved && !reflect.DeepEqual(cfg.Agents[agentName], saved) {
+				t.Fatalf("saved configuration changed: %#v", cfg.Agents[agentName])
+			}
+			if tc.savedAgent != "" && cfg.Agents["minimax"].Model != "MiniMax-M3.1-Flash" {
+				t.Fatal("expected the MiniMax preset alongside the saved default agent")
 			}
 
 			var requests []map[string]any
