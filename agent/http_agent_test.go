@@ -12,6 +12,14 @@ import (
 )
 
 func TestHTTPAgentChatWithAttachmentsUsesNativeMediaContent(t *testing.T) {
+	for _, model := range []string{"MiniMax-M3.1-Flash", "MiniMax-M3"} {
+		t.Run(model, func(t *testing.T) {
+			testHTTPAgentChatWithAttachmentsUsesNativeMediaContent(t, model)
+		})
+	}
+}
+
+func testHTTPAgentChatWithAttachmentsUsesNativeMediaContent(t *testing.T, model string) {
 	var request struct {
 		Messages []struct {
 			Role    string `json:"role"`
@@ -37,7 +45,7 @@ func TestHTTPAgentChatWithAttachmentsUsesNativeMediaContent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ag := NewHTTPAgent(HTTPAgentConfig{Endpoint: server.URL, Model: "MiniMax-M3"})
+	ag := NewHTTPAgent(HTTPAgentConfig{Endpoint: server.URL, Model: model})
 	reply, err := ag.ChatWithAttachments(context.Background(), "conversation", "Describe the media.", []Attachment{
 		{Path: imagePath, MIMEType: "image/png", Name: "sample.png"},
 		{Path: videoPath, MIMEType: "video/mp4", Name: "sample.mp4"},

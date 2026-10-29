@@ -108,7 +108,9 @@ func (a *HTTPAgent) ChatWithAttachments(ctx context.Context, conversationID stri
 	if len(attachments) == 0 {
 		return a.Chat(ctx, conversationID, message)
 	}
-	if a.model != "MiniMax-M3" {
+	switch a.model {
+	case "MiniMax-M3.1-Flash", "MiniMax-M3":
+	default:
 		return a.Chat(ctx, conversationID, MessageWithAttachmentFallback(message, attachments))
 	}
 
